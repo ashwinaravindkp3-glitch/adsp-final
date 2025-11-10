@@ -1,0 +1,44 @@
+% analyze_wavelet.m
+% A script to perform and visualize a 2D single-level wavelet decomposition.
+
+clear; clc; close all;
+
+% --- 1. Setup ---
+disp('Loading reference image...');
+image_filename = 'test_note_100_1.jpg';
+if ~exist(image_filename, 'file'), error('Reference image not found.'); end
+
+img_color = imread(image_filename);
+img_gray = convertToGrayscale(img_color);
+
+% --- 2. Wavelet Decomposition ---
+disp('Performing 2D Discrete Wavelet Transform (DWT)...');
+% We will use the 'Haar' wavelet for this demonstration.
+wavelet_type = 'haar'; 
+[cA, cH, cV, cD] = dwt2(img_gray, wavelet_type);
+
+% --- 3. Visualization ---
+figure('Name', '2D Wavelet Analysis', 'WindowState', 'maximized');
+sgtitle(['Single-Level Wavelet Decomposition (', wavelet_type, ')']);
+
+% Plot the Approximation coefficients (low-frequency)
+subplot(2, 2, 1);
+imshow(cA, []); % Use [] to autoscale the display range
+title('Approximation Coefficients (LL)');
+
+% Plot the Horizontal detail coefficients
+subplot(2, 2, 2);
+imshow(cH, []);
+title('Horizontal Detail (LH)');
+
+% Plot the Vertical detail coefficients
+subplot(2, 2, 3);
+imshow(cV, []);
+title('Vertical Detail (HL)');
+
+% Plot the Diagonal detail coefficients
+subplot(2, 2, 4);
+imshow(cD, []);
+title('Diagonal Detail (HH)');
+
+disp('Analysis complete.');

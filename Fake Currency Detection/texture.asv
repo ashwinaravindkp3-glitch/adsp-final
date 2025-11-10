@@ -1,0 +1,113 @@
+% compare_directional_texture.m
+% Differentiates textures based on their directional properties using a Gabor filter bank.
+
+clear; clc; close all;
+
+% --- 1. Setup ---
+disp('Loading images...');
+ref_filename = 'reference_note_100.png';
+fake_filename = 'test_note_100_.jpg';
+
+ref_img = imread(ref_filename);
+fake_img = imread(fake_filename);
+
+% ROI covering the portrait, same as before
+texture_roi_rect = [550, 120, 350, 400];
+
+% --- 2. Preprocessing & ROI Extraction ---
+disp('Aligning image and preparing ROIs...');
+aligned_fake_img = align_image_to_reference(fake_img, ref_img);
+
+ref_gray = rgb2gray(ref_img);
+fake_gray_aligned = rgb2gray(aligned_fake_img);
+
+% Crop to the region of interest for analysis
+roi_ref = im2double(imcrop(ref_gray, texture_roi_rect));
+roi_fake = im2double(imcrop(fake_gray_aligned, texture_roi_rect));
+
+% --- 3. Gabor Filter Bank Analysis ---
+disp('Analyzing texture with Gabor filter bank...');
+% Create a bank of Gabor filters at different orientations
+orientations = 0:45:135; % 0, 45, 90, 135 degrees
+gabor_bank = gabor(4, orientations); % Wavelength of 4 pixels
+
+% Pre-allocate arrays to store energy values
+energy_ref = zeros(1, length(orientations));
+energy_fake = zeros(1, length(orientations));
+
+% Apply each filter and calculate the response energy
+for i = 1:length(gabor_bank)
+    % Filter the reference ROI
+    g_mag_ref = abs(imfilter(roi_ref, gabor_bank(i).SpatialKernel, 'conv', 'replicate'));
+    energy_ref(i) = mean(g_mag_ref(:).^2); % Mean Square Energy
+    
+    % Filter the fake ROI
+    g_mag_fake = abs(imfilter(roi_fake, gabor_bank(i).SpatialKernel, 'conv', 'replicate'));
+    energy_fake(i) = mean(g_mag_fake(:).^2); % Mean Square Energy
+end
+
+% --- 4. Calculate Final Differentiating Score ---
+% The score is the standard deviation of the energy responses.
+% A high value indicates a strong preference for certain orientations (genuine).
+% A low value indicates a uniform response (fake).
+score_ref = std(energy_ref);
+score_fake = std(energy_fake);
+
+% --- 5. Visualization & Results ---
+disp('Displaying results...');
+figure('Name', 'Directional Texture Analysis with Gabor Filters', 'WindowState', 'maximized');
+
+% Bar chart of the "Texture Signature"
+subplot(2, 1, 1);
+bar_data = [energy_ref', energy_fake'];
+bar(orientations, bar_data);
+title('Gabor Filter Energy Response by Orientation');
+xlabel('Filter Orientation (Degrees)');
+ylabel('Mean Square Energy');
+legend('Reference Note', 'Fake Note');
+grid on;
+set(gca, 'XTick', orientations);
+
+% Display final scores
+subplot(2, 1, 2);
+% Remove axes and display text
+axis off;
+text(0.5, 0.7, 'Texture Directionality Score', 'FontSize', 16, 'HorizontalAlignment', 'center');
+text(0.5, 0.5, sprintf('Reference (Genuine): %.6f', score_ref), 'FontSize', 14, 'HorizontalAlignment', 'center', 'Color', 'blue');
+text(0.5, 0.3, sprintf('Fake: %.6f', score_fake), 'FontSize', 14, 'HorizontalAlignment', 'center', 'Color', 'red');
+text(0.5, 0.1, '(Score = Std. Dev. of Energies. High score indicates genuine directional texture.)', 'HorizontalAlignment', 'center');
+
+
+fprintf('\n--- GABOR TEXTURE ANALYSIS COMPLETE ---\n');
+fprintf('Directionality Score (Reference): %.6f\n', score_ref);
+fprintf('Directionality Score (Fake):      %.6f\n', score_fake);
+fprintf('-----------------------------------------\n');
+
+%% --- HELPER FUNCTION FOR IMAGE ALIGNMENT (MEMORY-EFFICIENT VERSION) ---
+% (Paste the same align_image_to_reference function from the previous script here)
+function warped_img = align_image_to_reference(test_img, ref_img)
+    ref_gray = rgb2gray(ref_img);
+    test_gray = rgb2gray(test_img);
+    ref_points_all = detectORBFeatures(ref_gray);
+    test_points_all = detectORBFeatures(test_gray);
+    max_features = 5000;
+    ref_points = ref_points_all.selectStrongest(max_features);
+    test_points = test_points_all.selectStrongest(max_features);
+    [ref_features, ref_valid_points] = extractFeatures(ref_gray, ref_points);
+    [test_features, test_valid_points] = extractFeatures(test_gray, test_points);
+    index_pairs = matchFeatures(ref_features, test_features, 'MaxRatio', 0.7, 'Unique', true);
+    matched_ref_points = ref_valid_points(index_pairs(:, 1), :);
+    matched_test_points = test_valid_points(index_pairs(:, 2), :);
+    if size(matched_ref_points, 1) < 10
+        warning('Not enough strong matches found. Returning unaligned image.');
+        warped_img = test_img; return;
+    end
+    try
+        tform = estimateGeometricTransform2D(matched_test_points, matched_ref_points, 'projective');
+    catch
+        warning('Could not compute homography. Returning unaligned image.');
+        warped_img = test_img; return;
+    end
+    output_view = imref2d(size(ref_img));
+    warped_img = imwarp(test_img, tform, 'OutputView', output_view);
+end
