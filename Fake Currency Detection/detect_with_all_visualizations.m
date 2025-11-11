@@ -15,10 +15,10 @@ function [verdict, final_score, all_vis_data] = detect_with_all_visualizations(t
     ref_scanner_path = 'ref_scanner.png';
     ref_camera_path = 'ref_camera.png';
 
-    weight_A = 0.40;  % Template matching
-    weight_B = 0.40;  % Color/structure
-    weight_C = 0.20;  % Gabor texture
-    decision_threshold = 0.65;
+    weight_A = 0.35;  % Template matching + sharpness
+    weight_B = 0.45;  % Color quality analysis
+    weight_C = 0.20;  % Print quality + halftone detection
+    decision_threshold = 0.55;  % Lower threshold for robustness
 
     % Initialize output structure
     all_vis_data = struct();

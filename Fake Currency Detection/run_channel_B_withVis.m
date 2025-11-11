@@ -48,8 +48,11 @@ function [score, vis_data] = run_channel_B_withVis(aligned_image, ref_image_path
     score_saturation = (sat_mean_ratio + sat_std_ratio) / 2;
 
     % Penalize if saturation is too low (photocopies often lose saturation)
-    if test_sat_mean < 0.15
-        score_saturation = score_saturation * 0.5;
+    % But be lenient to account for lighting variations
+    if test_sat_mean < 0.10
+        score_saturation = score_saturation * 0.7;
+    elseif test_sat_mean < 0.05
+        score_saturation = score_saturation * 0.4;
     end
 
     vis_data.test_sat_mean = test_sat_mean;

@@ -73,10 +73,10 @@ function [score, vis_data] = run_channel_C_withVis(aligned_image, ref_image_path
 
     % Photocopies often have HIGHER mid-frequency energy (halftone dots)
     % So penalize if test has much more than reference
-    if test_mid_ratio > ref_mid_ratio * 1.5
-        score_halftone = 0.3;  % Likely photocopy
-    elseif test_mid_ratio > ref_mid_ratio * 1.2
-        score_halftone = 0.6;
+    if test_mid_ratio > ref_mid_ratio * 2.0
+        score_halftone = 0.4;  % Strong halftone pattern - likely photocopy
+    elseif test_mid_ratio > ref_mid_ratio * 1.5
+        score_halftone = 0.7;  % Some halftone pattern
     else
         score_halftone = 1.0;  % Good - similar to reference
     end

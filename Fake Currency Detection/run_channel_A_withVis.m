@@ -82,12 +82,14 @@ function [score, vis_data] = run_channel_A_withVis(aligned_image)
             end
 
             % Sharpness threshold (is it sharp enough?)
-            % Genuine notes: sharpness > 0.03
-            % Photocopies: sharpness < 0.02 (blurred)
-            if sharpness >= 0.03
+            % Genuine notes: sharpness > 0.015
+            % Photocopies: sharpness < 0.01 (blurred)
+            if sharpness >= 0.02
                 template_score = template_score + 0.5;
-            elseif sharpness >= 0.02
-                template_score = template_score + 0.25;
+            elseif sharpness >= 0.01
+                template_score = template_score + 0.35;
+            elseif sharpness >= 0.005
+                template_score = template_score + 0.15;
             end
 
             total_score = total_score + template_score;
