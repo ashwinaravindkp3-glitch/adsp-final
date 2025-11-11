@@ -1,134 +1,152 @@
-function [score, vis_data] = run_channel_B_withVis(aligned_color_image)
-%run_channel_B_withVis Channel B with visualization outputs
+function [score, vis_data] = run_channel_B_withVis(aligned_image, ~)
+%run_channel_B_withVis Channel B: Detect photocopy artifacts
+%
+%   PHILOSOPHY: Don't compare to reference. Instead, measure properties
+%   that distinguish genuine notes from photocopies:
+%   - Genuine notes: High local variance, rich detail, natural randomness
+%   - Photocopies: Print patterns, quantization, reduced dynamic range
+%
+%   Returns score (0-1, higher = more likely genuine)
 
     vis_data = struct();
-    vis_data.input_image = aligned_color_image;
+    vis_data.input_image = aligned_image;
 
-    % --- METHOD 1: Security Thread ---
-    [score_thread, vis_thread] = analyzeSecurityThread_withVis(aligned_color_image);
-    vis_data.method1_thread = vis_thread;
-    vis_data.score_thread = score_thread;
-
-    % --- METHOD 2: Bleed Lines ---
-    [score_lines, vis_lines] = analyzeBleedLines_withVis(aligned_color_image);
-    vis_data.method2_lines = vis_lines;
-    vis_data.score_lines = score_lines;
-
-    % --- FINAL SCORE ---
-    score = (score_thread + score_lines) / 2;
-    vis_data.final_score = score;
-
-end
-
-% ========================================================================
-% METHOD 1: Security Thread
-% ========================================================================
-function [score, vis_data] = analyzeSecurityThread_withVis(image)
-    vis_data = struct();
-
-    % Extract ROI
-    roi_rect = [900, 1, 45, size(image, 1)-1];
-    thread_roi = imcrop(image, roi_rect);
-
-    vis_data.roi_location = roi_rect;
-    vis_data.roi_image = thread_roi;
-
-    % Convert to L*a*b*
-    thread_lab = rgb2lab(thread_roi);
-    a_channel = thread_lab(:,:,2);
-    L_channel = thread_lab(:,:,1);
-
-    vis_data.lab_L = L_channel;
-    vis_data.lab_a = a_channel;
-
-    % Analyze greenness
-    avg_a_star = mean(a_channel(:));
-    score_green = 1 / (1 + exp(0.5 * (avg_a_star + 15)));
-
-    vis_data.avg_a_star = avg_a_star;
-    vis_data.score_green = score_green;
-
-    % Saturation
-    thread_hsv = rgb2hsv(thread_roi);
-    s_channel = thread_hsv(:,:,2);
-    avg_saturation = mean(s_channel(:));
-    score_saturation = 1 / (1 + exp(-15 * (avg_saturation - 0.3)));
-
-    vis_data.hsv_saturation = s_channel;
-    vis_data.avg_saturation = avg_saturation;
-    vis_data.score_saturation = score_saturation;
-
-    % Final score
-    score = score_green * score_saturation;
-    vis_data.final_score = score;
-end
-
-% ========================================================================
-% METHOD 2: Bleed Lines
-% ========================================================================
-function [score, vis_data] = analyzeBleedLines_withVis(image)
-    vis_data = struct();
-
-    % Convert to L*a*b*
-    image_lab = rgb2lab(image);
-    L_channel = image_lab(:,:,1);
-
-    vis_data.L_channel = L_channel;
-
-    % --- LEFT ROI ---
-    roi_left = [20, 150, 75, 200];
-    left_roi = imcrop(L_channel, roi_left);
-
-    vis_data.roi_left_location = roi_left;
-    vis_data.roi_left_image = left_roi;
-
-    [left_count, vis_left] = countBleedLines_withVis(left_roi);
-    vis_data.left_count = left_count;
-    vis_data.left_analysis = vis_left;
-
-    % --- RIGHT ROI ---
-    roi_right = [1572, 234, 95, 126];
-    right_roi = imcrop(L_channel, roi_right);
-
-    vis_data.roi_right_location = roi_right;
-    vis_data.roi_right_image = right_roi;
-
-    [right_count, vis_right] = countBleedLines_withVis(right_roi);
-    vis_data.right_count = right_count;
-    vis_data.right_analysis = vis_right;
-
-    % --- SCORE ---
-    if left_count == 4 && right_count == 4
-        score = 1.0;
+    % Convert to grayscale
+    if size(aligned_image, 3) == 3
+        gray = rgb2gray(aligned_image);
     else
-        score = 0.0;
+        gray = aligned_image;
+    end
+    vis_data.step1_grayscale = gray;
+
+    %% METHOD 1: Local Variance Analysis
+    % Genuine notes have high local variance due to paper texture and micro-printing
+    % Photocopies have reduced variance (smoother, more uniform)
+
+    window_size = 7;
+    local_variance = stdfilt(gray, ones(window_size));
+    mean_local_variance = mean(local_variance(:));
+
+    vis_data.method1_color = local_variance;  % Keep field name for GUI compatibility
+    vis_data.method1_mean_variance = mean_local_variance;
+
+    % Score based on local variance (higher = genuine)
+    % Typical values: Genuine > 15, Photocopy < 10
+    if mean_local_variance >= 15
+        score_variance = 1.0;
+    elseif mean_local_variance >= 12
+        score_variance = 0.8;
+    elseif mean_local_variance >= 10
+        score_variance = 0.5;
+    else
+        score_variance = 0.2;
     end
 
+    %% METHOD 2: Frequency Domain Analysis
+    % Photocopies have characteristic periodic patterns from printer dots
+    % Use FFT to detect periodicity
+
+    gray_double = im2double(gray);
+    fft_result = fft2(gray_double);
+    fft_shifted = fftshift(fft_result);
+    magnitude_spectrum = abs(fft_shifted);
+
+    % Log scale for visualization
+    vis_data.method2_gradient = log(1 + magnitude_spectrum);  % Keep field name for GUI
+
+    % Analyze high-frequency energy
+    [M, N] = size(magnitude_spectrum);
+    center_mask = zeros(M, N);
+    % Exclude DC and very low frequencies (central 20%)
+    center_r = round(min(M, N) * 0.1);
+    [Y, X] = meshgrid(1:N, 1:M);
+    center_mask = sqrt((X - M/2).^2 + (Y - N/2).^2) > center_r;
+
+    high_freq_energy = sum(magnitude_spectrum(center_mask));
+    total_energy = sum(magnitude_spectrum(:));
+    hf_ratio = high_freq_energy / total_energy;
+
+    vis_data.method2_hf_ratio = hf_ratio;
+
+    % Genuine notes have more high-frequency content (fine details)
+    % Typical: Genuine > 0.35, Photocopy < 0.30
+    if hf_ratio >= 0.35
+        score_freq = 1.0;
+    elseif hf_ratio >= 0.32
+        score_freq = 0.7;
+    elseif hf_ratio >= 0.28
+        score_freq = 0.4;
+    else
+        score_freq = 0.1;
+    end
+
+    %% METHOD 3: Edge Density and Sharpness
+    % Genuine notes have sharp, well-defined edges from printing
+    % Photocopies lose edge sharpness
+
+    edges = edge(gray, 'Canny');
+    edge_density = sum(edges(:)) / numel(edges);
+
+    % Measure edge sharpness using gradient magnitude
+    [Gx, Gy] = gradient(double(gray));
+    gradient_mag = sqrt(Gx.^2 + Gy.^2);
+    mean_gradient = mean(gradient_mag(:));
+
+    vis_data.method3_edges = edges;
+    vis_data.method3_edge_density = edge_density;
+    vis_data.method3_mean_gradient = mean_gradient;
+
+    % Score based on edge quality
+    % Genuine: edge_density > 0.15, mean_gradient > 8
+    if edge_density >= 0.15 && mean_gradient >= 8
+        score_edge = 1.0;
+    elseif edge_density >= 0.12 && mean_gradient >= 6
+        score_edge = 0.7;
+    elseif edge_density >= 0.08
+        score_edge = 0.4;
+    else
+        score_edge = 0.2;
+    end
+
+    %% METHOD 4: Color Analysis (if RGB)
+    if size(aligned_image, 3) == 3
+        % Convert to L*a*b* for perceptual color analysis
+        lab_image = rgb2lab(aligned_image);
+        a_channel = lab_image(:,:,2);
+        b_channel = lab_image(:,:,3);
+
+        % Measure color variance
+        color_variance = std(a_channel(:)) + std(b_channel(:));
+
+        vis_data.method4_lab_a = a_channel;
+        vis_data.method4_lab_b = b_channel;
+        vis_data.method4_color_variance = color_variance;
+
+        % Genuine notes have richer color variation
+        % Typical: Genuine > 8, Photocopy < 6
+        if color_variance >= 8
+            score_color = 1.0;
+        elseif color_variance >= 6
+            score_color = 0.6;
+        else
+            score_color = 0.3;
+        end
+    else
+        score_color = 0.5;  % Neutral if grayscale
+    end
+
+    %% FINAL SCORE: Weighted average
+    score = (score_variance * 0.35) + (score_freq * 0.35) + (score_edge * 0.20) + (score_color * 0.10);
+
+    vis_data.score_color = score_variance;  % For GUI compatibility
+    vis_data.score_gradient = score_freq;  % For GUI compatibility
+    vis_data.score_variance = score_variance;
+    vis_data.score_freq = score_freq;
+    vis_data.score_edge = score_edge;
+    vis_data.score_colorvar = score_color;
     vis_data.final_score = score;
-end
 
-% ========================================================================
-% Helper: Count Lines
-% ========================================================================
-function [line_count, vis_data] = countBleedLines_withVis(roi)
-    vis_data = struct();
+    fprintf('  Channel B: Variance=%.2f (%.2f), Freq=%.2f (%.2f), Edge=%.2f (%.2f), Color=%.2f → Final=%.3f\n', ...
+        mean_local_variance, score_variance, hf_ratio, score_freq, edge_density, score_edge, score_color, score);
 
-    % Horizontal projection
-    projection = mean(roi, 2);
-    vis_data.projection = projection;
-
-    % Invert
-    projection_inverted = max(projection) - projection;
-    vis_data.projection_inverted = projection_inverted;
-
-    % Find peaks
-    [pks, locs] = findpeaks(projection_inverted, ...
-                           'MinPeakHeight', mean(projection_inverted), ...
-                           'MinPeakDistance', 10);
-
-    vis_data.peaks = pks;
-    vis_data.peak_locations = locs;
-
-    line_count = length(locs);
-    vis_data.line_count = line_count;
 end

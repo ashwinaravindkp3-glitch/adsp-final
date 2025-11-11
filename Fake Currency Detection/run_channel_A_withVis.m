@@ -21,7 +21,7 @@ function [score, vis_data] = run_channel_A_withVis(aligned_image)
         'template_rbi_seal.jpg'
     };
 
-    detection_threshold = 0.60;
+    detection_threshold = 0.45;  % Lowered for robustness to lighting/alignment
     num_found = 0;
 
     vis_data.templates = cell(length(template_files), 1);

@@ -62,7 +62,7 @@ function WorkingGUI()
                         'Position', [290 710 260 30], 'Callback', @(s,e) showTab(2));
     btnTab3 = uicontrol('Style', 'pushbutton', 'String', '3. CHANNEL B', ...
                         'Position', [560 710 260 30], 'Callback', @(s,e) showTab(3));
-    btnTab4 = uicontrol('Style', 'pushbutton', 'String', '4. CHANNEL D', ...
+    btnTab4 = uicontrol('Style', 'pushbutton', 'String', '4. CHANNEL C', ...
                         'Position', [830 710 260 30], 'Callback', @(s,e) showTab(4));
     btnTab5 = uicontrol('Style', 'pushbutton', 'String', '5. RESULTS', ...
                         'Position', [1100 710 260 30], 'Callback', @(s,e) showTab(5));
@@ -182,7 +182,7 @@ function createAxes(p1, p2, p3, p4, p5)
     subplot(2, 2, 3, 'Parent', p3, 'Tag', 'ax3_3'); title('Left Bleed Lines');
     subplot(2, 2, 4, 'Parent', p3, 'Tag', 'ax3_4'); title('Right Projection');
 
-    % Panel 4: Channel D (4 subplots)
+    % Panel 4: Channel C (4 subplots)
     subplot(2, 2, 1, 'Parent', p4, 'Tag', 'ax4_1'); title('Grayscale');
     subplot(2, 2, 2, 'Parent', p4, 'Tag', 'ax4_2'); title('Gabor Response');
     subplot(2, 2, 3, 'Parent', p4, 'Tag', 'ax4_3'); title('All Peaks');
@@ -248,47 +248,46 @@ function updateVisualizations(fig)
     end
 
     try
-        % TAB 3: Channel B
+        % TAB 3: Channel B - FIXED
         axes(findobj(fig, 'Tag', 'ax3_1'));
-        imshow(vis.channel_B.method1_thread.roi_image);
-        title(sprintf('Thread Score: %.3f', vis.channel_B.score_thread));
+        imshow(vis.channel_B.input_image);
+        title(sprintf('Test Image (Score: %.3f)', vis.channel_B.final_score));
 
         axes(findobj(fig, 'Tag', 'ax3_2'));
-        imagesc(vis.channel_B.method1_thread.lab_a); colorbar;
-        title(sprintf('a*=%.2f (green<0)', vis.channel_B.method1_thread.avg_a_star));
+        imagesc(vis.channel_B.method1_color.test_a); colorbar;
+        title(sprintf('a* Channel (Color: %.3f)', vis.channel_B.score_color));
 
         axes(findobj(fig, 'Tag', 'ax3_3'));
-        imshow(vis.channel_B.method2_lines.roi_left_image, []);
-        title(sprintf('Left: %d lines', vis.channel_B.method2_lines.left_count));
+        plot(vis.channel_B.method1_color.hist_test_a, 'b', 'LineWidth', 2); hold on;
+        plot(vis.channel_B.method1_color.hist_ref_a, 'r--', 'LineWidth', 2);
+        legend('Test', 'Ref'); title('Histogram Comparison'); hold off;
 
         axes(findobj(fig, 'Tag', 'ax3_4'));
-        plot(vis.channel_B.method2_lines.right_analysis.projection_inverted);
-        hold on;
-        plot(vis.channel_B.method2_lines.right_analysis.peak_locations, ...
-             vis.channel_B.method2_lines.right_analysis.peaks, 'ro', 'MarkerSize', 8);
-        title(sprintf('Right: %d lines (Score: %.1f)', ...
-              vis.channel_B.method2_lines.right_count, vis.channel_B.score_lines));
-        hold off;
+        imagesc(vis.channel_B.method2_gradient.test_gradient); colorbar;
+        title(sprintf('Gradient (Score: %.3f)', vis.channel_B.score_gradient));
     catch ME
         fprintf('Error updating Tab 3: %s\n', ME.message);
     end
 
     try
-        % TAB 4: Channel D
+        % TAB 4: Channel C - FIXED
         axes(findobj(fig, 'Tag', 'ax4_1'));
-        imshow(vis.channel_D.step1_grayscale);
+        imshow(vis.channel_C.step1_test_grayscale);
+        title('Test Grayscale');
 
         axes(findobj(fig, 'Tag', 'ax4_2'));
-        imagesc(vis.channel_D.step3_gabor_magnitude); colorbar;
+        imagesc(vis.channel_C.step3_test_gabor); colorbar;
+        title(sprintf('Test Gabor (%d peaks)', vis.channel_C.step5_test_peak_count));
 
         axes(findobj(fig, 'Tag', 'ax4_3'));
-        imshow(vis.channel_D.step4_peaks_mask);
-        title(sprintf('All Peaks: %d', vis.channel_D.step4_total_peaks));
+        imagesc(vis.channel_C.step3_ref_gabor); colorbar;
+        title(sprintf('Ref Gabor (%d peaks)', vis.channel_C.step5_ref_peak_count));
 
         axes(findobj(fig, 'Tag', 'ax4_4'));
-        imshow(vis.channel_D.step5_significant_peaks_mask);
-        title(sprintf('Significant: %d (Score: %.1f)', ...
-              vis.channel_D.step5_peak_count, vis.channel_D.final_score));
+        bar([vis.channel_C.step5_test_peak_count, vis.channel_C.step5_ref_peak_count]);
+        set(gca, 'XTickLabel', {'Test', 'Ref'});
+        title(sprintf('Ratio: %.2f, Score: %.1f', vis.channel_C.step5_peak_ratio, vis.channel_C.final_score));
+        ylabel('Peaks');
     catch ME
         fprintf('Error updating Tab 4: %s\n', ME.message);
     end
@@ -296,9 +295,9 @@ function updateVisualizations(fig)
     try
         % TAB 5: Results
         axes(findobj(fig, 'Tag', 'ax5_1'));
-        scores = [vis.scores.channel_A, vis.scores.channel_B, vis.scores.channel_D];
+        scores = [vis.scores.channel_A, vis.scores.channel_B, vis.scores.channel_C];
         bar(scores);
-        set(gca, 'XTickLabel', {'Channel A', 'Channel B', 'Channel D'});
+        set(gca, 'XTickLabel', {'Channel A', 'Channel B', 'Channel C'});
         ylabel('Score'); ylim([0 1]); grid on;
         title('Individual Channel Scores');
 
