@@ -15,10 +15,10 @@ function [verdict, final_score, all_vis_data] = detect_with_all_visualizations(t
     ref_scanner_path = 'ref_scanner.png';
     ref_camera_path = 'ref_camera.png';
 
-    weight_A = 0.25;  % Template matching (both genuine and photocopy have templates)
-    weight_B = 0.45;  % Difference analysis (KEY for detecting photocopies)
-    weight_C = 0.30;  % Halftone/print pattern detection
-    decision_threshold = 0.60;  % Threshold for classification
+    weight_A = 0.33;  % NCC Template matching
+    weight_B = 0.34;  % Color channel analysis (R, G, Saturation)
+    weight_C = 0.33;  % Gabor peak counting
+    decision_threshold = 0.65;  % Threshold for classification
 
     % Initialize output structure
     all_vis_data = struct();
