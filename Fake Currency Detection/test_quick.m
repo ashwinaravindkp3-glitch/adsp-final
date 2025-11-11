@@ -4,8 +4,10 @@ fprintf('===== TESTING REDESIGNED DETECTION SYSTEM =====\n\n');
 test_images = {
     'test_note_100_1.jpg', 'GENUINE';
     'test_note_100_2.jpg', 'GENUINE';
-    'test_note_fake_colour.jpg', 'FAKE';
-    'test_note_fake_1.jpg', 'FAKE';
+    'test_note_100_3.jpg', 'GENUINE';
+    'test_note_fake_colour.jpg', 'COUNTERFEIT';
+    'test_note_fake_1.jpg', 'COUNTERFEIT';
+    'test_note_fake_2.jpg', 'COUNTERFEIT';
 };
 
 results = {};
