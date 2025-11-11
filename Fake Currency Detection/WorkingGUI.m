@@ -62,7 +62,7 @@ function WorkingGUI()
                         'Position', [290 710 260 30], 'Callback', @(s,e) showTab(2));
     btnTab3 = uicontrol('Style', 'pushbutton', 'String', '3. CHANNEL B', ...
                         'Position', [560 710 260 30], 'Callback', @(s,e) showTab(3));
-    btnTab4 = uicontrol('Style', 'pushbutton', 'String', '4. CHANNEL D', ...
+    btnTab4 = uicontrol('Style', 'pushbutton', 'String', '4. CHANNEL C', ...
                         'Position', [830 710 260 30], 'Callback', @(s,e) showTab(4));
     btnTab5 = uicontrol('Style', 'pushbutton', 'String', '5. RESULTS', ...
                         'Position', [1100 710 260 30], 'Callback', @(s,e) showTab(5));
@@ -182,7 +182,7 @@ function createAxes(p1, p2, p3, p4, p5)
     subplot(2, 2, 3, 'Parent', p3, 'Tag', 'ax3_3'); title('Left Bleed Lines');
     subplot(2, 2, 4, 'Parent', p3, 'Tag', 'ax3_4'); title('Right Projection');
 
-    % Panel 4: Channel D (4 subplots)
+    % Panel 4: Channel C (4 subplots)
     subplot(2, 2, 1, 'Parent', p4, 'Tag', 'ax4_1'); title('Grayscale');
     subplot(2, 2, 2, 'Parent', p4, 'Tag', 'ax4_2'); title('Gabor Response');
     subplot(2, 2, 3, 'Parent', p4, 'Tag', 'ax4_3'); title('All Peaks');
@@ -274,21 +274,21 @@ function updateVisualizations(fig)
     end
 
     try
-        % TAB 4: Channel D
+        % TAB 4: Channel C
         axes(findobj(fig, 'Tag', 'ax4_1'));
-        imshow(vis.channel_D.step1_grayscale);
+        imshow(vis.channel_C.step1_grayscale);
 
         axes(findobj(fig, 'Tag', 'ax4_2'));
-        imagesc(vis.channel_D.step3_gabor_magnitude); colorbar;
+        imagesc(vis.channel_C.step3_gabor_magnitude); colorbar;
 
         axes(findobj(fig, 'Tag', 'ax4_3'));
-        imshow(vis.channel_D.step4_peaks_mask);
-        title(sprintf('All Peaks: %d', vis.channel_D.step4_total_peaks));
+        imshow(vis.channel_C.step4_peaks_mask);
+        title(sprintf('All Peaks: %d', vis.channel_C.step4_total_peaks));
 
         axes(findobj(fig, 'Tag', 'ax4_4'));
-        imshow(vis.channel_D.step5_significant_peaks_mask);
+        imshow(vis.channel_C.step5_significant_peaks_mask);
         title(sprintf('Significant: %d (Score: %.1f)', ...
-              vis.channel_D.step5_peak_count, vis.channel_D.final_score));
+              vis.channel_C.step5_peak_count, vis.channel_C.final_score));
     catch ME
         fprintf('Error updating Tab 4: %s\n', ME.message);
     end
@@ -296,9 +296,9 @@ function updateVisualizations(fig)
     try
         % TAB 5: Results
         axes(findobj(fig, 'Tag', 'ax5_1'));
-        scores = [vis.scores.channel_A, vis.scores.channel_B, vis.scores.channel_D];
+        scores = [vis.scores.channel_A, vis.scores.channel_B, vis.scores.channel_C];
         bar(scores);
-        set(gca, 'XTickLabel', {'Channel A', 'Channel B', 'Channel D'});
+        set(gca, 'XTickLabel', {'Channel A', 'Channel B', 'Channel C'});
         ylabel('Score'); ylim([0 1]); grid on;
         title('Individual Channel Scores');
 
