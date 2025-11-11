@@ -1,152 +1,145 @@
-function [score, vis_data] = run_channel_B_withVis(aligned_image, ~)
-%run_channel_B_withVis Channel B: Detect photocopy artifacts
+function [score, vis_data] = run_channel_B_withVis(aligned_image, ref_image_path)
+%run_channel_B_withVis Channel B: Color Quality Analysis
 %
-%   PHILOSOPHY: Don't compare to reference. Instead, measure properties
-%   that distinguish genuine notes from photocopies:
-%   - Genuine notes: High local variance, rich detail, natural randomness
-%   - Photocopies: Print patterns, quantization, reduced dynamic range
-%
-%   Returns score (0-1, higher = more likely genuine)
+%   Compares color richness and gradient smoothness against reference.
+%   Photocopies have: flattened colors, banding, reduced saturation range.
 
     vis_data = struct();
     vis_data.input_image = aligned_image;
 
-    % Convert to grayscale
-    if size(aligned_image, 3) == 3
-        gray = rgb2gray(aligned_image);
-    else
-        gray = aligned_image;
-    end
-    vis_data.step1_grayscale = gray;
-
-    %% METHOD 1: Local Variance Analysis
-    % Genuine notes have high local variance due to paper texture and micro-printing
-    % Photocopies have reduced variance (smoother, more uniform)
-
-    window_size = 7;
-    local_variance = stdfilt(gray, ones(window_size));
-    mean_local_variance = mean(local_variance(:));
-
-    vis_data.method1_color = local_variance;  % Keep field name for GUI compatibility
-    vis_data.method1_mean_variance = mean_local_variance;
-
-    % Score based on local variance (higher = genuine)
-    % Typical values: Genuine > 15, Photocopy < 10
-    if mean_local_variance >= 15
-        score_variance = 1.0;
-    elseif mean_local_variance >= 12
-        score_variance = 0.8;
-    elseif mean_local_variance >= 10
-        score_variance = 0.5;
-    else
-        score_variance = 0.2;
+    if nargin < 2
+        ref_image_path = 'ref_camera.png';
     end
 
-    %% METHOD 2: Frequency Domain Analysis
-    % Photocopies have characteristic periodic patterns from printer dots
-    % Use FFT to detect periodicity
+    % Load and resize reference
+    ref_image = imread(ref_image_path);
+    ref_image = imresize(ref_image, size(aligned_image(:,:,1)));
+    vis_data.reference_image = ref_image;
 
-    gray_double = im2double(gray);
-    fft_result = fft2(gray_double);
-    fft_shifted = fftshift(fft_result);
-    magnitude_spectrum = abs(fft_shifted);
+    %% METHOD 1: Color Histogram Similarity
+    % Genuine notes should have similar color distribution to reference
+    % Photocopies will have different (often reduced) color range
 
-    % Log scale for visualization
-    vis_data.method2_gradient = log(1 + magnitude_spectrum);  % Keep field name for GUI
+    % Convert to HSV for better color analysis
+    test_hsv = rgb2hsv(aligned_image);
+    ref_hsv = rgb2hsv(ref_image);
 
-    % Analyze high-frequency energy
-    [M, N] = size(magnitude_spectrum);
-    center_mask = zeros(M, N);
-    % Exclude DC and very low frequencies (central 20%)
-    center_r = round(min(M, N) * 0.1);
-    [Y, X] = meshgrid(1:N, 1:M);
-    center_mask = sqrt((X - M/2).^2 + (Y - N/2).^2) > center_r;
+    % Extract channels
+    test_h = test_hsv(:,:,1);
+    test_s = test_hsv(:,:,2);
+    test_v = test_hsv(:,:,3);
 
-    high_freq_energy = sum(magnitude_spectrum(center_mask));
-    total_energy = sum(magnitude_spectrum(:));
-    hf_ratio = high_freq_energy / total_energy;
+    ref_h = ref_hsv(:,:,1);
+    ref_s = ref_hsv(:,:,2);
+    ref_v = ref_hsv(:,:,3);
 
-    vis_data.method2_hf_ratio = hf_ratio;
+    vis_data.method1_color = test_s;  % For GUI
 
-    % Genuine notes have more high-frequency content (fine details)
-    % Typical: Genuine > 0.35, Photocopy < 0.30
-    if hf_ratio >= 0.35
-        score_freq = 1.0;
-    elseif hf_ratio >= 0.32
-        score_freq = 0.7;
-    elseif hf_ratio >= 0.28
-        score_freq = 0.4;
-    else
-        score_freq = 0.1;
+    % Saturation statistics
+    test_sat_mean = mean(test_s(:));
+    ref_sat_mean = mean(ref_s(:));
+    test_sat_std = std(test_s(:));
+    ref_sat_std = std(ref_s(:));
+
+    % Score based on saturation similarity
+    sat_mean_ratio = min(test_sat_mean, ref_sat_mean) / max(test_sat_mean, ref_sat_mean);
+    sat_std_ratio = min(test_sat_std, ref_sat_std) / max(test_sat_std, ref_sat_std);
+
+    score_saturation = (sat_mean_ratio + sat_std_ratio) / 2;
+
+    % Penalize if saturation is too low (photocopies often lose saturation)
+    if test_sat_mean < 0.15
+        score_saturation = score_saturation * 0.5;
     end
 
-    %% METHOD 3: Edge Density and Sharpness
-    % Genuine notes have sharp, well-defined edges from printing
-    % Photocopies lose edge sharpness
+    vis_data.test_sat_mean = test_sat_mean;
+    vis_data.ref_sat_mean = ref_sat_mean;
+    vis_data.score_saturation = score_saturation;
 
-    edges = edge(gray, 'Canny');
-    edge_density = sum(edges(:)) / numel(edges);
+    %% METHOD 2: Gradient Smoothness
+    % Genuine notes have smooth color gradients
+    % Photocopies show banding (posterization)
 
-    % Measure edge sharpness using gradient magnitude
-    [Gx, Gy] = gradient(double(gray));
-    gradient_mag = sqrt(Gx.^2 + Gy.^2);
-    mean_gradient = mean(gradient_mag(:));
+    % Convert to L*a*b* for perceptual analysis
+    test_lab = rgb2lab(aligned_image);
+    ref_lab = rgb2lab(ref_image);
 
-    vis_data.method3_edges = edges;
-    vis_data.method3_edge_density = edge_density;
-    vis_data.method3_mean_gradient = mean_gradient;
+    test_L = test_lab(:,:,1);
+    ref_L = ref_lab(:,:,1);
 
-    % Score based on edge quality
-    % Genuine: edge_density > 0.15, mean_gradient > 8
-    if edge_density >= 0.15 && mean_gradient >= 8
-        score_edge = 1.0;
-    elseif edge_density >= 0.12 && mean_gradient >= 6
-        score_edge = 0.7;
-    elseif edge_density >= 0.08
-        score_edge = 0.4;
-    else
-        score_edge = 0.2;
-    end
+    % Calculate gradients
+    [test_gx, test_gy] = gradient(test_L);
+    test_grad_mag = sqrt(test_gx.^2 + test_gy.^2);
 
-    %% METHOD 4: Color Analysis (if RGB)
-    if size(aligned_image, 3) == 3
-        % Convert to L*a*b* for perceptual color analysis
-        lab_image = rgb2lab(aligned_image);
-        a_channel = lab_image(:,:,2);
-        b_channel = lab_image(:,:,3);
+    [ref_gx, ref_gy] = gradient(ref_L);
+    ref_grad_mag = sqrt(ref_gx.^2 + ref_gy.^2);
 
-        % Measure color variance
-        color_variance = std(a_channel(:)) + std(b_channel(:));
+    vis_data.method2_gradient = test_grad_mag;  % For GUI
 
-        vis_data.method4_lab_a = a_channel;
-        vis_data.method4_lab_b = b_channel;
-        vis_data.method4_color_variance = color_variance;
+    % Histogram of gradients (should be similar to reference)
+    [test_hist, ~] = histcounts(test_grad_mag(:), 50);
+    [ref_hist, ~] = histcounts(ref_grad_mag(:), 50);
 
-        % Genuine notes have richer color variation
-        % Typical: Genuine > 8, Photocopy < 6
-        if color_variance >= 8
-            score_color = 1.0;
-        elseif color_variance >= 6
-            score_color = 0.6;
-        else
-            score_color = 0.3;
+    % Normalize histograms
+    test_hist = test_hist / sum(test_hist);
+    ref_hist = ref_hist / sum(ref_hist);
+
+    % Correlation between gradient histograms
+    grad_corr = corr(test_hist', ref_hist');
+
+    score_gradient = max(0, grad_corr);  % Clamp to [0,1]
+
+    vis_data.gradient_correlation = grad_corr;
+    vis_data.score_gradient = score_gradient;
+
+    %% METHOD 3: Color Variance in Local Regions
+    % Genuine notes have rich local color variation
+    % Photocopies have reduced local variation
+
+    % Divide image into blocks and measure color variance
+    block_size = 32;
+    [h, w, ~] = size(aligned_image);
+
+    test_variances = [];
+    ref_variances = [];
+
+    for y = 1:block_size:h-block_size
+        for x = 1:block_size:w-block_size
+            test_block = aligned_image(y:y+block_size-1, x:x+block_size-1, :);
+            ref_block = ref_image(y:y+block_size-1, x:x+block_size-1, :);
+
+            % Variance across color channels
+            test_var = std(double(test_block(:)));
+            ref_var = std(double(ref_block(:)));
+
+            test_variances(end+1) = test_var;
+            ref_variances(end+1) = ref_var;
         end
-    else
-        score_color = 0.5;  % Neutral if grayscale
     end
 
-    %% FINAL SCORE: Weighted average
-    score = (score_variance * 0.35) + (score_freq * 0.35) + (score_edge * 0.20) + (score_color * 0.10);
+    % Compare variance distributions
+    test_var_mean = mean(test_variances);
+    ref_var_mean = mean(ref_variances);
 
-    vis_data.score_color = score_variance;  % For GUI compatibility
-    vis_data.score_gradient = score_freq;  % For GUI compatibility
+    var_ratio = min(test_var_mean, ref_var_mean) / max(test_var_mean, ref_var_mean);
+    score_variance = var_ratio;
+
+    % Boost if variance is reasonably high (not too flat)
+    if test_var_mean >= 20
+        score_variance = min(1.0, score_variance * 1.2);
+    end
+
+    vis_data.test_var_mean = test_var_mean;
+    vis_data.ref_var_mean = ref_var_mean;
     vis_data.score_variance = score_variance;
-    vis_data.score_freq = score_freq;
-    vis_data.score_edge = score_edge;
-    vis_data.score_colorvar = score_color;
+
+    %% FINAL SCORE
+    score = (score_saturation * 0.35) + (score_gradient * 0.40) + (score_variance * 0.25);
+
+    vis_data.score_color = score_saturation;  % For GUI compatibility
     vis_data.final_score = score;
 
-    fprintf('  Channel B: Variance=%.2f (%.2f), Freq=%.2f (%.2f), Edge=%.2f (%.2f), Color=%.2f → Final=%.3f\n', ...
-        mean_local_variance, score_variance, hf_ratio, score_freq, edge_density, score_edge, score_color, score);
+    fprintf('  Channel B: Sat=%.3f, Grad=%.3f, Var=%.3f → Final=%.3f\n', ...
+        score_saturation, score_gradient, score_variance, score);
 
 end
