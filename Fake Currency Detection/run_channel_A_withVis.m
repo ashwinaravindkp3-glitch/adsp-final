@@ -1,8 +1,7 @@
 function [score, vis_data] = run_channel_A_withVis(aligned_image)
-%run_channel_A_withVis Channel A: Security Feature Detection
+%run_channel_A_withVis Channel A: Template Matching ONLY
 %
-%   Detects if security features (Ashoka, Devanagari, RBI seal) are present
-%   AND sharp. Photocopies often blur these features.
+%   Simple template detection - do templates exist?
 
     vis_data = struct();
     vis_data.input_image = aligned_image;
@@ -18,7 +17,7 @@ function [score, vis_data] = run_channel_A_withVis(aligned_image)
     gray_enhanced = adapthisteq(gray);
     vis_data.step1_enhanced = gray_enhanced;
 
-    % --- STEP 1: Template Matching with Sharpness Check ---
+    % Templates
     template_files = {
         'template_ashoka.jpg', ...
         'template_devanagiri.jpg', ...
@@ -29,14 +28,12 @@ function [score, vis_data] = run_channel_A_withVis(aligned_image)
     vis_data.correlation_maps = cell(length(template_files), 1);
     vis_data.max_corr_values = zeros(length(template_files), 1);
     vis_data.detected = false(length(template_files), 1);
-    vis_data.sharpness_scores = zeros(length(template_files), 1);
     vis_data.template_names = template_files;
 
-    total_score = 0;
+    num_found = 0;
 
     for i = 1:length(template_files)
         try
-            % Load and prepare template
             template = imread(template_files{i});
             if size(template, 3) == 3
                 template_gray = rgb2gray(template);
@@ -47,70 +44,39 @@ function [score, vis_data] = run_channel_A_withVis(aligned_image)
 
             vis_data.templates{i} = template_enhanced;
 
-            % Normalized Cross-Correlation
+            % NCC
             corr_map = normxcorr2(template_enhanced, gray_enhanced);
             max_corr = max(corr_map(:));
 
             vis_data.correlation_maps{i} = corr_map;
             vis_data.max_corr_values(i) = max_corr;
 
-            % Find best match location
-            [ypeak, xpeak] = find(corr_map == max_corr, 1);
-
-            % Extract matched region for sharpness check
-            [t_h, t_w] = size(template_enhanced);
-            y_start = max(1, ypeak - t_h + 1);
-            y_end = min(size(gray_enhanced, 1), y_start + t_h - 1);
-            x_start = max(1, xpeak - t_w + 1);
-            x_end = min(size(gray_enhanced, 2), x_start + t_w - 1);
-
-            matched_region = gray_enhanced(y_start:y_end, x_start:x_end);
-
-            % Measure sharpness using Laplacian variance
-            laplacian = del2(double(matched_region));
-            sharpness = std(laplacian(:));
-
-            vis_data.sharpness_scores(i) = sharpness;
-
-            % Score this template
-            template_score = 0;
-
-            % Correlation threshold (template found?)
-            if max_corr >= 0.4
-                template_score = template_score + 0.5;
+            % Simple threshold
+            if max_corr >= 0.35
+                num_found = num_found + 1;
                 vis_data.detected(i) = true;
             end
 
-            % Sharpness threshold (is it sharp enough?)
-            % Genuine notes: sharpness > 0.015
-            % Photocopies: sharpness < 0.01 (blurred)
-            if sharpness >= 0.02
-                template_score = template_score + 0.5;
-            elseif sharpness >= 0.01
-                template_score = template_score + 0.35;
-            elseif sharpness >= 0.005
-                template_score = template_score + 0.15;
+            if vis_data.detected(i)
+                status_str = 'FOUND';
+            else
+                status_str = 'NOT FOUND';
             end
-
-            total_score = total_score + template_score;
-
-            fprintf('  Template %d (%s): Corr=%.3f, Sharp=%.4f → Score=%.2f\n', ...
-                i, template_files{i}, max_corr, sharpness, template_score);
+            fprintf('  Template %d: Corr=%.3f %s\n', i, max_corr, status_str);
 
         catch ME
             vis_data.templates{i} = [];
             vis_data.correlation_maps{i} = [];
             vis_data.max_corr_values(i) = 0;
             vis_data.detected(i) = false;
-            fprintf('  Template %d failed: %s\n', i, ME.message);
         end
     end
 
-    % Final score: average across all templates (max = 1.0)
-    score = total_score / length(template_files);
+    % Score: how many templates found?
+    score = num_found / length(template_files);
     vis_data.final_score = score;
-    vis_data.num_detected = sum(vis_data.detected);
+    vis_data.num_detected = num_found;
 
-    fprintf('  Channel A Final: %.4f (detected %d/%d)\n', score, sum(vis_data.detected), length(template_files));
+    fprintf('  Channel A: Found %d/%d → Score=%.3f\n', num_found, length(template_files), score);
 
 end
