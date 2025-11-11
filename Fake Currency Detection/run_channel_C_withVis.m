@@ -1,203 +1,177 @@
-function [score, vis_data] = run_channel_C_withVis(aligned_image, ref_image_path)
-%run_channel_C_withVis ADVANCED Texture Analysis (100% Accuracy Mode)
+function [score, vis_data] = run_channel_C_withVis(aligned_image, ~)
+%run_channel_C_withVis Channel C: Paper authenticity analysis
 %
-%   Uses GLCM + Multi-scale Gabor + Statistical Features
+%   PHILOSOPHY: Don't compare to reference. Instead, measure texture
+%   complexity that is inherent to genuine currency paper:
+%   - Genuine notes: Complex natural fiber texture, high entropy, randomness
+%   - Photocopies: Regular paper lacks texture complexity, lower entropy
+%
+%   Returns score (0-1, higher = more likely genuine)
 
     vis_data = struct();
     vis_data.input_image = aligned_image;
 
-    if nargin < 2
-        ref_image_path = 'ref_camera.png';
-    end
-    ref_image = imread(ref_image_path);
-    ref_image = imresize(ref_image, size(aligned_image(:,:,1)));
-    vis_data.reference_image = ref_image;
-
     % Convert to grayscale
     if size(aligned_image, 3) == 3
-        test_gray = rgb2gray(aligned_image);
+        gray = rgb2gray(aligned_image);
     else
-        test_gray = aligned_image;
+        gray = aligned_image;
+    end
+    vis_data.step1_test_grayscale = gray;
+
+    %% METHOD 1: Texture Entropy
+    % Genuine currency paper has high local entropy due to fiber structure
+    % Photocopies on regular paper have lower entropy
+
+    entropy_map = entropyfilt(gray, ones(9));
+    mean_entropy = mean(entropy_map(:));
+
+    vis_data.method1_entropy_map = entropy_map;
+    vis_data.method1_mean_entropy = mean_entropy;
+
+    % Score based on entropy
+    % Genuine: > 5.5, Photocopy: < 4.5
+    if mean_entropy >= 5.5
+        score_entropy = 1.0;
+    elseif mean_entropy >= 5.0
+        score_entropy = 0.8;
+    elseif mean_entropy >= 4.5
+        score_entropy = 0.5;
+    else
+        score_entropy = 0.2;
     end
 
-    if size(ref_image, 3) == 3
-        ref_gray = rgb2gray(ref_image);
+    %% METHOD 2: GLCM Texture Complexity
+    % Analyze texture using Gray-Level Co-occurrence Matrix
+    % Genuine notes have more complex texture patterns
+
+    % Quantize to reduce computation
+    gray_quant = im2uint8(mat2gray(gray));
+    gray_quant = imadjust(gray_quant);
+
+    % Create GLCM in multiple directions
+    offsets = [0 1; -1 1; -1 0; -1 -1];
+    glcm = graycomatrix(gray_quant, 'Offset', offsets, 'Symmetric', true, 'NumLevels', 16);
+    stats = graycoprops(glcm, {'Contrast', 'Correlation', 'Energy', 'Homogeneity'});
+
+    contrast = mean(stats.Contrast);
+    correlation = mean(stats.Correlation);
+    energy = mean(stats.Energy);
+    homogeneity = mean(stats.Homogeneity);
+
+    vis_data.method2_glcm_contrast = contrast;
+    vis_data.method2_glcm_correlation = correlation;
+    vis_data.method2_glcm_energy = energy;
+    vis_data.method2_glcm_homogeneity = homogeneity;
+
+    % Genuine notes have:
+    % - Higher contrast (more texture variation)
+    % - Lower energy (less uniformity)
+    % - Moderate homogeneity
+
+    score_glcm = 0;
+
+    % Contrast score (higher is better for genuine)
+    if contrast >= 2.0
+        score_glcm = score_glcm + 0.3;
+    elseif contrast >= 1.5
+        score_glcm = score_glcm + 0.2;
     else
-        ref_gray = ref_image;
+        score_glcm = score_glcm + 0.1;
     end
 
-    vis_data.step1_test_grayscale = test_gray;
-    vis_data.step1_ref_grayscale = ref_gray;
+    % Energy score (lower is better for genuine - indicates non-uniformity)
+    if energy <= 0.1
+        score_glcm = score_glcm + 0.3;
+    elseif energy <= 0.15
+        score_glcm = score_glcm + 0.2;
+    else
+        score_glcm = score_glcm + 0.1;
+    end
 
-    % --- METHOD 1: GLCM Texture Features ---
-    [score_glcm, vis_glcm] = analyzeGLCM(test_gray, ref_gray);
+    % Correlation score
+    if correlation >= 0.7
+        score_glcm = score_glcm + 0.2;
+    else
+        score_glcm = score_glcm + 0.1;
+    end
 
-    % --- METHOD 2: Multi-scale Gabor + Edge Sharpness ---
-    [score_gabor, vis_gabor] = analyzeMultiScaleTexture(test_gray, ref_gray);
+    % Homogeneity score
+    if homogeneity >= 0.5 && homogeneity <= 0.8
+        score_glcm = score_glcm + 0.2;
+    else
+        score_glcm = score_glcm + 0.1;
+    end
 
-    % Store for GUI
-    vis_data.gabor_wavelength = 4;
-    vis_data.gabor_orientation = 90;
-    vis_data.step3_test_gabor = vis_gabor.test_gabor;
-    vis_data.step3_ref_gabor = vis_gabor.ref_gabor;
-    vis_data.step4_test_peaks_mask = vis_gabor.test_peaks;
-    vis_data.step4_ref_peaks_mask = vis_gabor.ref_peaks;
-    vis_data.step4_test_total_peaks = vis_gabor.test_peak_count;
-    vis_data.step4_ref_total_peaks = vis_gabor.ref_peak_count;
-    vis_data.step5_test_peak_count = vis_gabor.test_peak_count;
-    vis_data.step5_ref_peak_count = vis_gabor.ref_peak_count;
-    vis_data.step5_peak_ratio = vis_gabor.peak_ratio;
+    %% METHOD 3: Gabor Texture Analysis
+    % Multi-orientation Gabor to detect directional texture patterns
+    % Genuine notes have rich multi-directional texture
 
-    % --- FINAL SCORE ---
-    score = (score_glcm + score_gabor) / 2;
+    wavelength = 4;
+    orientations = [0, 45, 90, 135];
+    gabor_responses = zeros(size(gray, 1), size(gray, 2), length(orientations));
+
+    for i = 1:length(orientations)
+        gabor_filter = gabor(wavelength, orientations(i));
+        gabor_responses(:,:,i) = imgaborfilt(gray, wavelength, orientations(i));
+    end
+
+    % Calculate response strength
+    gabor_magnitude = sqrt(sum(gabor_responses.^2, 3));
+    mean_gabor_response = mean(gabor_magnitude(:));
+
+    vis_data.step3_test_gabor = gabor_responses(:,:,3);  % For visualization
+    vis_data.method3_gabor_magnitude = gabor_magnitude;
+    vis_data.method3_mean_response = mean_gabor_response;
+
+    % Genuine notes have higher Gabor response due to complex texture
+    if mean_gabor_response >= 15
+        score_gabor = 1.0;
+    elseif mean_gabor_response >= 10
+        score_gabor = 0.7;
+    elseif mean_gabor_response >= 7
+        score_gabor = 0.4;
+    else
+        score_gabor = 0.2;
+    end
+
+    %% METHOD 4: Standard Deviation of Local Statistics
+    % Measure variation in local properties - genuine paper is more heterogeneous
+
+    % Calculate standard deviation in local windows
+    window_size = 15;
+    std_map = stdfilt(gray, ones(window_size));
+    std_of_std = std(std_map(:));  % How much does local variation vary?
+
+    vis_data.method4_std_map = std_map;
+    vis_data.method4_std_of_std = std_of_std;
+
+    % Genuine notes have higher "variation of variation"
+    if std_of_std >= 6
+        score_heterogeneity = 1.0;
+    elseif std_of_std >= 4.5
+        score_heterogeneity = 0.7;
+    elseif std_of_std >= 3
+        score_heterogeneity = 0.4;
+    else
+        score_heterogeneity = 0.2;
+    end
+
+    %% FINAL SCORE: Weighted average
+    score = (score_entropy * 0.30) + (score_glcm * 0.30) + (score_gabor * 0.25) + (score_heterogeneity * 0.15);
+
+    vis_data.score_entropy = score_entropy;
+    vis_data.score_glcm = score_glcm;
+    vis_data.score_gabor = score_gabor;
+    vis_data.score_heterogeneity = score_heterogeneity;
     vis_data.final_score = score;
 
-    fprintf('  Channel C: GLCM=%.3f, Gabor=%.3f → Final=%.3f\n', ...
-            score_glcm, score_gabor, score);
-end
+    % For GUI compatibility - create dummy peak data
+    vis_data.step4_test_peaks_mask = gabor_magnitude > mean(gabor_magnitude(:));
+    vis_data.step4_test_total_peaks = sum(vis_data.step4_test_peaks_mask(:));
+    vis_data.step5_test_peak_count = vis_data.step4_test_total_peaks;
 
-% ========================================================================
-% METHOD 1: GLCM (Gray-Level Co-occurrence Matrix) Texture Analysis
-% ========================================================================
-function [score, vis_data] = analyzeGLCM(test_gray, ref_gray)
-    vis_data = struct();
+    fprintf('  Channel C: Entropy=%.2f (%.2f), GLCM=%.2f, Gabor=%.2f (%.2f), Hetero=%.2f (%.2f) → Final=%.3f\n', ...
+        mean_entropy, score_entropy, score_glcm, mean_gabor_response, score_gabor, std_of_std, score_heterogeneity, score);
 
-    % Quantize to 8 levels for GLCM (faster, more robust)
-    test_q = im2uint8(mat2gray(test_gray));
-    ref_q = im2uint8(mat2gray(ref_gray));
-
-    % Compute GLCM in 4 directions, distance=1
-    offsets = [0 1; -1 1; -1 0; -1 -1];
-
-    glcm_test = graycomatrix(test_q, 'Offset', offsets, 'Symmetric', true, 'NumLevels', 8);
-    glcm_ref = graycomatrix(ref_q, 'Offset', offsets, 'Symmetric', true, 'NumLevels', 8);
-
-    % Extract texture properties
-    stats_test = graycoprops(glcm_test, {'Contrast', 'Correlation', 'Energy', 'Homogeneity'});
-    stats_ref = graycoprops(glcm_ref, {'Contrast', 'Correlation', 'Energy', 'Homogeneity'});
-
-    % Average across directions
-    test_contrast = mean(stats_test.Contrast);
-    test_correlation = mean(stats_test.Correlation);
-    test_energy = mean(stats_test.Energy);
-    test_homogeneity = mean(stats_test.Homogeneity);
-
-    ref_contrast = mean(stats_ref.Contrast);
-    ref_correlation = mean(stats_ref.Correlation);
-    ref_energy = mean(stats_ref.Energy);
-    ref_homogeneity = mean(stats_ref.Homogeneity);
-
-    % Calculate similarity ratios
-    contrast_ratio = test_contrast / ref_contrast;
-    correlation_ratio = test_correlation / ref_correlation;
-    energy_ratio = test_energy / ref_energy;
-    homogeneity_ratio = test_homogeneity / ref_homogeneity;
-
-    % Score each feature (should be similar to reference)
-    if (contrast_ratio >= 0.7 && contrast_ratio <= 1.3)
-        score_contrast = 1.0;
-    else
-        score_contrast = 0.5;
-    end
-
-    if (correlation_ratio >= 0.85 && correlation_ratio <= 1.15)
-        score_correlation = 1.0;
-    else
-        score_correlation = 0.5;
-    end
-
-    if (energy_ratio >= 0.7 && energy_ratio <= 1.3)
-        score_energy = 1.0;
-    else
-        score_energy = 0.5;
-    end
-
-    if (homogeneity_ratio >= 0.85 && homogeneity_ratio <= 1.15)
-        score_homogeneity = 1.0;
-    else
-        score_homogeneity = 0.5;
-    end
-
-    % Combined GLCM score
-    score = (score_contrast + score_correlation + score_energy + score_homogeneity) / 4;
-
-    vis_data.test_contrast = test_contrast;
-    vis_data.ref_contrast = ref_contrast;
-    vis_data.contrast_ratio = contrast_ratio;
-
-    fprintf('    GLCM: Contrast=%.2f, Corr=%.2f, Energy=%.2f, Homo=%.2f\n', ...
-            contrast_ratio, correlation_ratio, energy_ratio, homogeneity_ratio);
-end
-
-% ========================================================================
-% METHOD 2: Multi-scale Gabor + Edge Analysis
-% ========================================================================
-function [score, vis_data] = analyzeMultiScaleTexture(test_gray, ref_gray)
-    vis_data = struct();
-
-    % Multi-scale Gabor analysis
-    wavelengths = [3, 4, 6];  % Multiple scales
-    orientations = [0, 45, 90, 135];  % Multiple orientations
-
-    test_responses = [];
-    ref_responses = [];
-
-    for wl = wavelengths
-        for ori = orientations
-            g = gabor(wl, ori);
-
-            test_resp = abs(imfilter(im2double(test_gray), g.SpatialKernel, 'conv'));
-            ref_resp = abs(imfilter(im2double(ref_gray), g.SpatialKernel, 'conv'));
-
-            test_responses = [test_responses; mean(test_resp(:))];
-            ref_responses = [ref_responses; mean(ref_resp(:))];
-        end
-    end
-
-    % Calculate correlation between response patterns
-    resp_correlation = corr(test_responses, ref_responses);
-
-    % Also check edge sharpness (photocopies lose edge detail)
-    test_edges = edge(test_gray, 'Canny');
-    ref_edges = edge(ref_gray, 'Canny');
-
-    test_edge_density = sum(test_edges(:)) / numel(test_edges);
-    ref_edge_density = sum(ref_edges(:)) / numel(ref_edges);
-
-    edge_ratio = test_edge_density / ref_edge_density;
-
-    % For visualization - use single Gabor
-    g_vert = gabor(4, 90);
-    test_gabor = abs(imfilter(im2double(test_gray), g_vert.SpatialKernel, 'conv'));
-    ref_gabor = abs(imfilter(im2double(ref_gray), g_vert.SpatialKernel, 'conv'));
-
-    test_peaks = imregionalmax(test_gabor);
-    ref_peaks = imregionalmax(ref_gabor);
-
-    vis_data.test_gabor = test_gabor;
-    vis_data.ref_gabor = ref_gabor;
-    vis_data.test_peaks = test_peaks;
-    vis_data.ref_peaks = ref_peaks;
-    vis_data.test_peak_count = sum(test_peaks(:));
-    vis_data.ref_peak_count = sum(ref_peaks(:));
-    vis_data.peak_ratio = vis_data.test_peak_count / vis_data.ref_peak_count;
-
-    % Scoring
-    if resp_correlation >= 0.85
-        score_resp = 1.0;
-    elseif resp_correlation >= 0.75
-        score_resp = 0.6;
-    else
-        score_resp = 0.3;
-    end
-
-    if (edge_ratio >= 0.80 && edge_ratio <= 1.20)
-        score_edge = 1.0;
-    else
-        score_edge = 0.5;
-    end
-
-    score = (score_resp + score_edge) / 2;
-
-    fprintf('    Gabor Correlation: %.3f, Edge Ratio: %.3f\n', resp_correlation, edge_ratio);
 end

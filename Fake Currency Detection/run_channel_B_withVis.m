@@ -1,136 +1,152 @@
-function [score, vis_data] = run_channel_B_withVis(aligned_color_image, ref_image_path)
-%run_channel_B_withVis ADVANCED Color & Structure Analysis (100% Accuracy Mode)
+function [score, vis_data] = run_channel_B_withVis(aligned_image, ~)
+%run_channel_B_withVis Channel B: Detect photocopy artifacts
 %
-%   Uses SSIM + Advanced Texture + Printer Artifact Detection
+%   PHILOSOPHY: Don't compare to reference. Instead, measure properties
+%   that distinguish genuine notes from photocopies:
+%   - Genuine notes: High local variance, rich detail, natural randomness
+%   - Photocopies: Print patterns, quantization, reduced dynamic range
+%
+%   Returns score (0-1, higher = more likely genuine)
 
     vis_data = struct();
-    vis_data.input_image = aligned_color_image;
-
-    if nargin < 2
-        ref_image_path = 'ref_camera.png';
-    end
-    ref_image = imread(ref_image_path);
-    ref_image = imresize(ref_image, size(aligned_color_image(:,:,1)));
-    vis_data.reference_image = ref_image;
-
-    % --- METHOD 1: SSIM (Structural Similarity) - MOST RELIABLE ---
-    [score_ssim, vis_ssim] = analyzeSSIM(aligned_color_image, ref_image);
-    vis_data.method1_color = vis_ssim;  % Keep field name for GUI
-    vis_data.score_color = score_ssim;
-
-    % --- METHOD 2: Printer Artifact Detection (DCT Analysis) ---
-    [score_printer, vis_printer] = detectPrinterArtifacts(aligned_color_image, ref_image);
-    vis_data.method2_gradient = vis_printer;  % Keep field name for GUI
-    vis_data.score_gradient = score_printer;
-
-    % --- FINAL SCORE ---
-    score = (score_ssim + score_printer) / 2;
-    vis_data.final_score = score;
-
-    fprintf('  Channel B: SSIM=%.3f, Printer=%.3f → Final=%.3f\n', ...
-            score_ssim, score_printer, score);
-end
-
-% ========================================================================
-% METHOD 1: SSIM - Structural Similarity Index
-% ========================================================================
-function [score, vis_data] = analyzeSSIM(test_img, ref_img)
-    vis_data = struct();
+    vis_data.input_image = aligned_image;
 
     % Convert to grayscale
-    test_gray = rgb2gray(test_img);
-    ref_gray = rgb2gray(ref_img);
-
-    % Calculate SSIM
-    [ssim_value, ssim_map] = ssim(test_gray, ref_gray);
-
-    vis_data.test_gray = test_gray;
-    vis_data.ref_gray = ref_gray;
-    vis_data.ssim_map = ssim_map;
-    vis_data.ssim_value = ssim_value;
-
-    % Also analyze in L*a*b* space for color
-    test_lab = rgb2lab(test_img);
-    ref_lab = rgb2lab(ref_img);
-
-    test_a = test_lab(:,:,2);
-    ref_a = ref_lab(:,:,2);
-
-    vis_data.test_a = test_a;
-    vis_data.ref_a = ref_a;
-
-    % Color histograms for GUI
-    [hist_test_a, ~] = imhist(uint8(mat2gray(test_a) * 255), 64);
-    [hist_ref_a, ~] = imhist(uint8(mat2gray(ref_a) * 255), 64);
-    vis_data.hist_test_a = hist_test_a / sum(hist_test_a);
-    vis_data.hist_ref_a = hist_ref_a / sum(hist_ref_a);
-
-    % SSIM scoring (genuine notes: 0.7-0.95, photocopies: 0.4-0.7)
-    if ssim_value >= 0.70
-        score = 1.0;
-    elseif ssim_value >= 0.60
-        score = 0.7;
-    elseif ssim_value >= 0.50
-        score = 0.4;
+    if size(aligned_image, 3) == 3
+        gray = rgb2gray(aligned_image);
     else
-        score = 0.0;  % Too different = fake
+        gray = aligned_image;
+    end
+    vis_data.step1_grayscale = gray;
+
+    %% METHOD 1: Local Variance Analysis
+    % Genuine notes have high local variance due to paper texture and micro-printing
+    % Photocopies have reduced variance (smoother, more uniform)
+
+    window_size = 7;
+    local_variance = stdfilt(gray, ones(window_size));
+    mean_local_variance = mean(local_variance(:));
+
+    vis_data.method1_color = local_variance;  % Keep field name for GUI compatibility
+    vis_data.method1_mean_variance = mean_local_variance;
+
+    % Score based on local variance (higher = genuine)
+    % Typical values: Genuine > 15, Photocopy < 10
+    if mean_local_variance >= 15
+        score_variance = 1.0;
+    elseif mean_local_variance >= 12
+        score_variance = 0.8;
+    elseif mean_local_variance >= 10
+        score_variance = 0.5;
+    else
+        score_variance = 0.2;
     end
 
-    vis_data.final_score = score;
-    fprintf('    SSIM: %.4f\n', ssim_value);
-end
+    %% METHOD 2: Frequency Domain Analysis
+    % Photocopies have characteristic periodic patterns from printer dots
+    % Use FFT to detect periodicity
 
-% ========================================================================
-% METHOD 2: Printer Artifact Detection (DCT Coefficients)
-% ========================================================================
-function [score, vis_data] = detectPrinterArtifacts(test_img, ref_img)
-    vis_data = struct();
+    gray_double = im2double(gray);
+    fft_result = fft2(gray_double);
+    fft_shifted = fftshift(fft_result);
+    magnitude_spectrum = abs(fft_shifted);
 
-    test_gray = rgb2gray(test_img);
-    ref_gray = rgb2gray(ref_img);
+    % Log scale for visualization
+    vis_data.method2_gradient = log(1 + magnitude_spectrum);  % Keep field name for GUI
 
-    vis_data.test_gray = test_gray;
-    vis_data.ref_gray = ref_gray;
+    % Analyze high-frequency energy
+    [M, N] = size(magnitude_spectrum);
+    center_mask = zeros(M, N);
+    % Exclude DC and very low frequencies (central 20%)
+    center_r = round(min(M, N) * 0.1);
+    [Y, X] = meshgrid(1:N, 1:M);
+    center_mask = sqrt((X - M/2).^2 + (Y - N/2).^2) > center_r;
 
-    % Compute DCT (Discrete Cosine Transform)
-    test_dct = dct2(im2double(test_gray));
-    ref_dct = dct2(im2double(ref_gray));
+    high_freq_energy = sum(magnitude_spectrum(center_mask));
+    total_energy = sum(magnitude_spectrum(:));
+    hf_ratio = high_freq_energy / total_energy;
 
-    % Analyze high-frequency DCT coefficients
-    % Photocopies have characteristic patterns in high frequencies
-    [M, N] = size(test_dct);
+    vis_data.method2_hf_ratio = hf_ratio;
 
-    % Get high-frequency region (bottom-right quadrant)
-    hf_test = abs(test_dct(round(M/2):end, round(N/2):end));
-    hf_ref = abs(ref_dct(round(M/2):end, round(N/2):end));
-
-    % Calculate energy in high frequencies
-    test_hf_energy = sum(hf_test(:).^2);
-    ref_hf_energy = sum(hf_ref(:).^2);
-
-    hf_ratio = test_hf_energy / ref_hf_energy;
-
-    % Compute gradient for visualization
-    test_grad = imgradient(test_gray);
-    ref_grad = imgradient(ref_gray);
-
-    vis_data.test_gradient = test_grad;
-    vis_data.ref_gradient = ref_grad;
-    vis_data.test_hf_energy = test_hf_energy;
-    vis_data.ref_hf_energy = ref_hf_energy;
-    vis_data.hf_ratio = hf_ratio;
-
-    % Scoring based on high-frequency content similarity
-    if hf_ratio >= 0.75 && hf_ratio <= 1.25
-        score = 1.0;
-    elseif hf_ratio >= 0.60 && hf_ratio <= 1.40
-        score = 0.6;
-    elseif hf_ratio >= 0.45 && hf_ratio <= 1.55
-        score = 0.3;
+    % Genuine notes have more high-frequency content (fine details)
+    % Typical: Genuine > 0.35, Photocopy < 0.30
+    if hf_ratio >= 0.35
+        score_freq = 1.0;
+    elseif hf_ratio >= 0.32
+        score_freq = 0.7;
+    elseif hf_ratio >= 0.28
+        score_freq = 0.4;
     else
-        score = 0.0;
+        score_freq = 0.1;
     end
 
+    %% METHOD 3: Edge Density and Sharpness
+    % Genuine notes have sharp, well-defined edges from printing
+    % Photocopies lose edge sharpness
+
+    edges = edge(gray, 'Canny');
+    edge_density = sum(edges(:)) / numel(edges);
+
+    % Measure edge sharpness using gradient magnitude
+    [Gx, Gy] = gradient(double(gray));
+    gradient_mag = sqrt(Gx.^2 + Gy.^2);
+    mean_gradient = mean(gradient_mag(:));
+
+    vis_data.method3_edges = edges;
+    vis_data.method3_edge_density = edge_density;
+    vis_data.method3_mean_gradient = mean_gradient;
+
+    % Score based on edge quality
+    % Genuine: edge_density > 0.15, mean_gradient > 8
+    if edge_density >= 0.15 && mean_gradient >= 8
+        score_edge = 1.0;
+    elseif edge_density >= 0.12 && mean_gradient >= 6
+        score_edge = 0.7;
+    elseif edge_density >= 0.08
+        score_edge = 0.4;
+    else
+        score_edge = 0.2;
+    end
+
+    %% METHOD 4: Color Analysis (if RGB)
+    if size(aligned_image, 3) == 3
+        % Convert to L*a*b* for perceptual color analysis
+        lab_image = rgb2lab(aligned_image);
+        a_channel = lab_image(:,:,2);
+        b_channel = lab_image(:,:,3);
+
+        % Measure color variance
+        color_variance = std(a_channel(:)) + std(b_channel(:));
+
+        vis_data.method4_lab_a = a_channel;
+        vis_data.method4_lab_b = b_channel;
+        vis_data.method4_color_variance = color_variance;
+
+        % Genuine notes have richer color variation
+        % Typical: Genuine > 8, Photocopy < 6
+        if color_variance >= 8
+            score_color = 1.0;
+        elseif color_variance >= 6
+            score_color = 0.6;
+        else
+            score_color = 0.3;
+        end
+    else
+        score_color = 0.5;  % Neutral if grayscale
+    end
+
+    %% FINAL SCORE: Weighted average
+    score = (score_variance * 0.35) + (score_freq * 0.35) + (score_edge * 0.20) + (score_color * 0.10);
+
+    vis_data.score_color = score_variance;  % For GUI compatibility
+    vis_data.score_gradient = score_freq;  % For GUI compatibility
+    vis_data.score_variance = score_variance;
+    vis_data.score_freq = score_freq;
+    vis_data.score_edge = score_edge;
+    vis_data.score_colorvar = score_color;
     vis_data.final_score = score;
-    fprintf('    DCT HF Ratio: %.3f\n', hf_ratio);
+
+    fprintf('  Channel B: Variance=%.2f (%.2f), Freq=%.2f (%.2f), Edge=%.2f (%.2f), Color=%.2f → Final=%.3f\n', ...
+        mean_local_variance, score_variance, hf_ratio, score_freq, edge_density, score_edge, score_color, score);
+
 end
